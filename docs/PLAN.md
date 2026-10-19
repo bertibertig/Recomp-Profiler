@@ -27,7 +27,7 @@ just like it does locally, then compare the results across machines.
 
 The current recomps target 6th-gen consoles: **Xbox, GameCube and PS2**. Xbox 360 and PS3 come later.
 
-**First projects:** *SSX 3* and *Amped 2*, both Xbox versions.
+**First projects:** *SSX 3* and *Amped 2*, both Xbox versions. Integration details are in [First projects](#first-projects-ssx-3-and-amped-2).
 
 | Graphics API | Linux | Windows |
 |---|---|---|
@@ -49,7 +49,7 @@ Everything that can be configured is configured through one TUI (`recomp-profile
   * **Overview:** agent status, version, connection info and IP addresses
   * **Agent:** name, bind address, port, advertised address, client IP allowlist, log level; rotate token/certificate; show `connection.json`
   * **System setup:** install/reinstall packages, perf/ptrace tuning, firewall, autostart service, uninstall
-  * **ROM sources:** NFS/SMB/local/HTTP shares (e.g. the NAS `roms` share), with a connection test
+  * **ROM sources:** NFS/SMB/local/HTTP shares (e.g. a NAS share), with a connection test
   * **Games:** per game: platform, recomp project folder, ROM source, path in the source, whether it's **extracted or a disc image** (plus the extractor command for images), supported and default render backend
   * **Hosts:** registered target machines, trust level (own/external), ping, remove
   * **Storage & profiling:** game-data store location and size limit, captures directory and retention, benchmark defaults (warm-up, duration)
@@ -71,8 +71,42 @@ A *manifest* lists every file with its size and hash, plus hashes of 4 MB chunks
 There are three ways to fill the store, and all of them are verified against the manifest:
 
 1. **Push from the dev machine (LAN default).** The agent compares manifests and only the missing chunks are streamed. They go over a dedicated binary channel on the same TLS port, using parallel streams that can resume after interruption, and each chunk is verified on arrival. Optional zstd compression is turned off automatically for data that doesn't shrink, since disc data mostly doesn't. On gigabit LAN, a full 8.5 GB DVD takes about 80 s and 16 GB about 2.5 min.
-2. **Pull from a LAN share.** You configure an SMB/NFS/HTTP share, and the agent copies from it directly, so the data never passes through the dev machine. Your current setup is an NAS server at `192.0.2.10` with the share `games`, available over both NFS and SMB. Linux agents use NFS, Windows agents use SMB.
+2. **Pull from a LAN share.** You configure an SMB/NFS/HTTP share, and the agent copies from it directly, so the data never passes through the dev machine. The first target is a NAS that exports the same share over NFS and SMB, with extracted games in per-platform folders (`Xbox/<Title>/`). Linux agents use NFS, Windows agents use SMB. The concrete server, share and mount point live only in each machine's `config.toml`.
 3. **Extract on the target.** The tester points the agent at their *own* disc image, and the agent runs the recomp's extractor locally. The result is checked against the expected manifest and the known dump hashes (Redump). This is the **only** mode allowed for hosts marked `trust: external` (remote testers over Tailscale), so game data is never distributed to other people.
+
+## First projects: SSX 3 and Amped 2
+
+Surveyed read-only on 2026-10-19. The projects themselves are not changed by this repo while they're being worked on.
+
+| | SSX 3 | Amped 2 |
+|---|---|---|
+| Repo | [bertibertig/SSX3-Recomp](https://github.com/bertibertig/SSX3-Recomp) | [bertibertig/Amped2-Recomp](https://github.com/bertibertig/Amped2-Recomp) |
+| Version | PAL, title ID 0x4541003C | PAL, title ID 0x4D530041 |
+| Game files | extracted into `game_files/` (≈2.2 GB) | extracted into `game_files/` (≈4.0 GB) |
+| Renderers | Vulkan (Linux, 55–60 fps in races) and CPU (reference) | Vulkan (≈55 fps riding) and CPU (≈6 fps, reference) |
+| Renderer switch | `SSX3_RENDERER=vulkan\|cpu` | `AMPED2_RENDERER=vulkan\|cpu` |
+| Windows | experimental, CPU renderer only, tested under Wine/Proton | Windows build scripts exist |
+| Launch | `scripts/run.sh` (start-up menu only on a TTY; `SSX3_MENU=0` forces it off) | `scripts/run.sh` |
+| Releases | `scripts/package_release.sh` → binary + scripts + `game_files/` side by side | – |
+
+**What this means for the profiler:**
+- **No shared runtime library.** Both pin the same toolkit, xboxrecomp v0.14.0 (git submodule). Amped 2's host and input code was copied from SSX 3. So a future `recomp_probe.h` belongs in xboxrecomp itself, or in a small shared host module both projects include. Until then, profiling must be **non-invasive**.
+- **Non-invasive measurement available today:**
+  - Vulkan: MangoHud (it's a Vulkan layer, so no code change is needed)
+  - Both renderers: the once-per-second window title `FPS: x (game y) | draws: n`, read via X11/XWayland window properties (presented fps and the game's own fps)
+  - CPU renderer: the SDL2 framebuffer window. Forcing `SDL_RENDER_DRIVER=opengl` should make it visible to MangoHud's OpenGL hook (to verify)
+- **Deterministic input for benchmarks already exists:** `RECOMP_PAD_SCRIPT=<ms>:<button>[:hold],…` or `@file` (xboxrecomp `usb_gamepad.c`). A benchmark spec can be a pad script that boots to a fixed race and rides it. Add `RECOMP_WATCHDOG_SECS` for hangs.
+- **`game_files/` holds more than the disc contents:** the projects add patched XBEs (`default.xbe` next to `default.xbe_orig`, `default_ffp.xbe`). A share mirror must include those, so it can serve as the source of truth for test machines. Manifests must **exclude generated files**: `default_analysis.json`, `README.md`, `CACHE/`.
+- **Couch co-op:** SSX 3 split screen already works with `RECOMP_USB_PADS=2` (≈27 fps; the game caps split screen at 30). Test it with two scripted pads.
+- **LAN multiplayer:** SSX 3 is planning it on the branch `feature/lan-multiplayer`, see `docs/lan-multiplayer.md`. It uses ENet over UDP with state sync at 30 Hz, a host-owned session, and **UDP broadcast** for LAN discovery plus direct IP. This is the "two machines" case from Phase 4b: test it with multi-host start, packet capture on the ENet port, and added latency and loss. Discovery needs broadcast, so over Tailscale only direct IP will work.
+- **Logs to collect after every run:** stderr, `xbox_kernel.log`, `logs/`, and BMP frame dumps (`SSX3_VK_DUMP` / `AMPED2_VK_DUMP` / `RECOMP_FB_DUMP`) for renderer comparisons across machines.
+
+**TODOs from this:**
+- [ ] Game settings: add `exclude` patterns, a launch command (default `scripts/run.sh` or the release's `run.sh`), a renderer environment variable name, and a required-file check (`default.xbe`), all editable in the TUI
+- [ ] Deploy unit for test machines = the release package layout (`package_release.sh`), with `game_files/` filled from the agent's game-data store
+- [ ] Window-title FPS reader and MangoHud log parser as the first frame-time backends
+- [ ] Benchmark spec built on `RECOMP_PAD_SCRIPT`: boot, enter a fixed race, ride N seconds, quit
+- [ ] Split-screen benchmark preset (`RECOMP_USB_PADS=2`, two pad scripts)
 
 ## Status: phase 0 (skeleton) ✅
 
@@ -92,7 +126,7 @@ There are three ways to fill the store, and all of them are verified against the
 - [ ] Binary streaming channel for file transfer (base64 currently costs 33% extra): parallel, resumable, chunk-verified, with progress reporting
 - [ ] Manifest format and a tool that generates one from an extracted game directory or a build output (`recomp-profiler manifest <dir>`)
 - [ ] Content-addressed store on the agent, with `gamedata.status/sync/link/gc` RPCs; MCP tools `sync_gamedata` and `deploy_build` that send only deltas
-- [ ] Source: pull from an SMB/NFS/HTTP share configured on the agent (first target: NAS `192.0.2.10`, share `games`; NFS on Linux, SMB on Windows; SMB credentials stay in the agent's local config, never in this repo)
+- [ ] Source: pull from an SMB/NFS/HTTP share configured on the agent (first target: a NAS share over NFS on Linux and SMB on Windows; server, share and credentials stay in each machine's local config, never in this repo)
 - [ ] Source: push from game files that sit in the dev machine's local recomp project folders (the current setup for SSX 3 and Amped 2)
 - [ ] Source: extract on the target from the tester's own disc image using the recomp's extractor, checked against Redump hashes
 - [ ] Host `trust: own|external` flag, and refuse to push game data to external hosts
@@ -170,12 +204,13 @@ There are three ways to fill the store, and all of them are verified against the
 - Platforms: Xbox, GameCube and PS2 first; 360 and PS3 later.
 - First projects: SSX 3 and Amped 2 (Xbox). CPU (software) renderer on both; Vulkan on Linux; Vulkan + OpenGL on Windows; D3D11/D3D12 later.
 - All configuration (installs, reinstalls, ROM shares, game locations, agent settings) goes through the TUI.
-- Game files: currently in the local project folders; ROMs also on the NAS NFS/SMB share `192.0.2.10` → `roms`.
+- Game files: extracted (not images), in each project's `game_files/` and mirrored on a NAS share (NFS + SMB). Setup-specific values (servers, paths, game entries) stay in local `config.toml` / `local/`, never in git.
+- The recomp repos are read-only for this project while they're being worked on.
 - Retro Windows (XP/98): minor goal, much later.
 - Windows: Python is fine, but `install.ps1` must install it (and every other tool) through winget.
 - Network: LAN first; Tailscale or another VPN later for remote testers.
 - License: MIT.
 
 ## Open questions
-1. Where are the SSX 3 and Amped 2 recomp repos (local paths/GitHub), and what does their runtime look like (shared runtime between both? existing frame timing or Tracy?) This decides where `recomp_probe.h` hooks in.
-2. Does the share hold raw disc images, extracted game files, or both? Pulling extracted files is direct; images need the extract-on-target step.
+1. Should `recomp_probe.h` (frame markers, zones, counters) eventually go upstream into xboxrecomp, or into a host module shared by your projects?
+2. Should test machines get release packages (binary + scripts) or full source builds? Release packages are smaller and match what players get.

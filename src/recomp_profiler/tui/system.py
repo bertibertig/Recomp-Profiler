@@ -181,7 +181,7 @@ async def test_source(src: RomSource) -> tuple[bool, str]:
         rc, out = await _capture(["showmount", "-e", src.host])
         if rc != 0:
             return False, out.strip()
-        # Unraid exports /mnt/user/<share>; accept either the full path or the share name.
+        # NAS exports are often /mnt/user/<share> (Unraid); accept either the full path or the share name.
         exports = [line.split()[0] for line in out.splitlines()[1:] if line.split()]
         found = any(e == src.share or e.rstrip("/").endswith("/" + src.share.strip("/")) for e in exports)
         return found, ("export found" if found else f"export {src.share!r} not listed") + f"\n{out.strip()}"

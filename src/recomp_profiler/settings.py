@@ -74,7 +74,7 @@ class ProfilingSettings:
 class RomSource:
     name: str = field(default="", metadata=ui("Name", "e.g. nas-games"))
     kind: str = field(default="nfs", metadata=ui("Type", choices=SOURCE_KINDS))
-    host: str = field(default="", metadata=ui("Server", "e.g. 192.0.2.10 (not used for local)"))
+    host: str = field(default="", metadata=ui("Server", "IP or host name, e.g. nas.local (not used for local)"))
     share: str = field(default="", metadata=ui("Share / export", "SMB share name or NFS export path, e.g. games or /mnt/user/games"))
     path: str = field(default="", metadata=ui("Base path", "Sub-folder inside the share, or the folder for local"))
     mount_point: str = field(default="", metadata=ui("Mount point", "Where it is/will be mounted locally; empty = access without mounting"))
