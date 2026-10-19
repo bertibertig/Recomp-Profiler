@@ -59,4 +59,11 @@ Access requires the 256-bit token and the client pins the agent's self-signed
 certificate. Keep it on a trusted LAN or VPN (Tailscale/WireGuard); don't port-forward it.
 `connection.json` is a credential.
 
+## Game files
+
+Current targets are Xbox, GameCube and PS2 recomps. Extracted game files are
+copyrighted. They are never stored in git and are moved separately from builds,
+using a content-addressed store on each agent that transfers each dataset once
+per machine. See "Builds vs. game files" in [docs/PLAN.md](docs/PLAN.md).
+
 See [docs/PLAN.md](docs/PLAN.md) for the roadmap.

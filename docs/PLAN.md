@@ -23,6 +23,30 @@ just like it does locally, then compare the results across machines.
 * **Dev side:** an MCP server (`mcp` 2.x, stdio), a CLI, and the Claude skill in `skills/recomp-profiler/`.
 * **Pairing:** `recomp-agent init` writes `connection.json` (address, port, token, fingerprint). Running `recomp-profiler add-host` on the dev machine registers it there.
 
+## Target platforms
+
+The current recomps target 6th-gen consoles: **Xbox, GameCube and PS2**. Xbox 360 and PS3 come later.
+
+## Builds vs. game files
+
+These two are handled separately because they behave very differently:
+
+| | Build (recomp executable + runtime) | Game files (extracted from your own discs) |
+|---|---|---|
+| Size | tens to hundreds of MB | GameCube ≈1.4 GB, Xbox/PS2 up to ≈8.5 GB, 360/PS3 16+ GB |
+| Changes | every iteration | almost never |
+| Legal | ours | copyrighted, never in git and never sent to anyone else's machine |
+
+**Content-addressed store on each agent.** Every machine keeps
+`~/.local/share/recomp-profiler/gamedata/<game-id>/<manifest-hash>/`.
+A *manifest* lists every file with its size and hash, plus hashes of 4 MB chunks. A test run references `game-id@manifest-hash`, and the agent links that data into the run directory or passes its path via an environment variable. Each dataset is transferred **once per machine**. After that, only the files or chunks that changed are sent. Builds use the same mechanism, with small manifests.
+
+There are three ways to fill the store, and all of them are verified against the manifest:
+
+1. **Push from the dev machine (LAN default).** The agent compares manifests and only the missing chunks are streamed. They go over a dedicated binary channel on the same TLS port, using parallel streams that can resume after interruption, and each chunk is verified on arrival. Optional zstd compression is turned off automatically for data that doesn't shrink, since disc data mostly doesn't. On gigabit LAN, a full 8.5 GB DVD takes about 80 s and 16 GB about 2.5 min.
+2. **Pull from a LAN share.** You configure an SMB/NFS/HTTP share (for example a NAS), and the agent copies from it directly, so the data never passes through the dev machine.
+3. **Extract on the target.** The tester points the agent at their *own* disc image, and the agent runs the recomp's extractor locally. The result is checked against the expected manifest and the known dump hashes (Redump). This is the **only** mode allowed for hosts marked `trust: external` (remote testers over Tailscale), so game data is never distributed to other people.
+
 ## Status: phase 0 (skeleton) ✅
 
 - [x] Agent: auth, TLS, concurrent RPC dispatch
@@ -37,9 +61,14 @@ just like it does locally, then compare the results across machines.
 
 ## TODOs
 
-### Phase 1: remote control MVP (make it pleasant)
-- [ ] Binary WebSocket frames for file transfer (base64 currently costs 33% extra), with progress reporting
-- [ ] Directory sync with per-file hashes, so redeploying a 2 GB build after a one-file change only sends the delta (`deploy_build` MCP tool)
+### Phase 1: remote control MVP + game-file transfer (see "Builds vs. game files")
+- [ ] Binary streaming channel for file transfer (base64 currently costs 33% extra): parallel, resumable, chunk-verified, with progress reporting
+- [ ] Manifest format and a tool that generates one from an extracted game directory or a build output (`recomp-profiler manifest <dir>`)
+- [ ] Content-addressed store on the agent, with `gamedata.status/sync/link/gc` RPCs; MCP tools `sync_gamedata` and `deploy_build` that send only deltas
+- [ ] Source: pull from an SMB/NFS/HTTP share configured on the agent
+- [ ] Source: extract on the target from the tester's own disc image using the recomp's extractor, checked against Redump hashes
+- [ ] Host `trust: own|external` flag, and refuse to push game data to external hosts
+- [ ] Disk space checks and garbage collection of unused datasets and builds
 - [ ] Pass the display/session environment through correctly (Wayland vs X11, `XDG_RUNTIME_DIR`), and import it into the systemd user service
 - [ ] Screenshot tool (grim/spectacle/gnome-screenshot/`xwd` on Linux, GDI/DXGI on Windows) so Claude can see what's on screen
 - [ ] Optional input injection (uinput / SendInput) for menu navigation in tests
@@ -70,10 +99,20 @@ just like it does locally, then compare the results across machines.
 - [ ] **Requirements derivation:** for each target (e.g. 60 fps with 1% low ≥ 55 at preset X), the weakest passing hardware becomes the minimum and the comfortable-margin hardware becomes the recommended. Normalize CPUs and GPUs into performance tiers so the results extrapolate to hardware we didn't test, and mark extrapolated entries as estimates
 - [ ] Generate a markdown/HTML spec sheet and per-hardware report, including known driver issues (Mesa version, NVIDIA proprietary vs nouveau/NVK, etc.)
 
+### Phase 4b: multiplayer, couch co-op and networking (TODO only; depends on how the recomps implement these)
+- [ ] **Local couch co-op:** virtual controllers per player (uinput on Linux, ViGEmBus or a successor on Windows) driven by scripted input per player. Check that each player's input is routed to the right player, and profile split-screen separately, since it often doubles rendering cost and gets its own requirements line
+- [ ] **"Pseudo" couch co-op across two machines:** run one session across two hosts. Start both at the same time, inject input on each, and measure input-to-remote latency and desync (compare state checksums if the runtime exposes them)
+- [ ] **Multi-host orchestration primitives:** `session_create(hosts, roles)`, synchronized start, and collecting logs and captures from all participants together
+- [ ] **Xbox System Link / Xbox Live** (Insignia-style revival services): multi-host LAN sessions, plus checks of the broadcast/UDP traffic (port 3074)
+- [ ] **GameCube Broadband Adapter LAN play** (e.g. Mario Kart: Double Dash!!, Phantasy Star Online): test whichever BBA backend the recomps implement (tap, UDP tunnel, XLink Kai-style)
+- [ ] **Network test tools:** packet capture on agents (tcpdump on Linux, pktmon on Windows, pulled to the dev machine as pcap) and network impairment (latency, jitter, loss via `tc netem` on Linux or clumsy on Windows) to test bad connections
+- [ ] **VPN caveat:** Tailscale/WireGuard don't forward LAN broadcasts, which System Link and BBA discovery rely on. Remote testing needs a broadcast relay or tunnel, and the tool should detect and report when that's missing
+- [ ] Optionally, the PS2 network adapter for the few PS2 online/LAN titles
+
 ### Phase 5: installers, CI, distribution
 - [ ] Container CI matrix for `install.sh`: debian:12, ubuntu:22.04/24.04, fedora:latest, rockylinux:8/9, archlinux, opensuse/tumbleweed and leap
 - [ ] Windows CI job for `install.ps1`, with shellcheck + PSScriptAnalyzer + pytest
-- [ ] Fetch PresentMon from GitHub releases (it has no winget id)
+- [ ] `install.ps1` must install **everything** without manual steps: Python via winget, plus WinDbg, WPR/WPA and Sysinternals via winget, and PresentMon from its GitHub release (it has no winget id)
 - [ ] More distros: Gentoo, Void, Alpine (musl), NixOS (flake), Bazzite/Fedora Atomic (rpm-ostree / toolbox)
 - [ ] Steam Deck / SteamOS: user-space only, Flatpak MangoHud
 - [ ] Optional single-file agent binary (PyInstaller or Nuitka) for machines that shouldn't get a Python install
@@ -84,8 +123,12 @@ just like it does locally, then compare the results across machines.
 - [ ] Read-only/observe-only mode for machines owned by other people (metrics and captures, no exec)
 - [ ] mDNS discovery (`_recomp-agent._tcp`) so hosts can be found without typing IPs (the token is still required)
 
+## Decisions
+- Platforms: Xbox, GameCube and PS2 first; 360 and PS3 later.
+- Windows: Python is fine, but `install.ps1` must install it (and every other tool) through winget.
+- Network: LAN first; Tailscale or another VPN later for remote testers.
+- License: MIT.
+
 ## Open questions
-1. Which recomp(s) come first (N64Recomp/RT64, XenonRecomp/Unleashed, ps2recomp, …)? This decides the graphics APIs and where `recomp_probe.h` hooks in.
-2. Is a Python install acceptable on Windows targets, or should a single-file agent binary be prioritized?
-3. Are the targets on the same LAN, or remote (friends/testers) over Tailscale or WireGuard?
-4. Is MIT the right license?
+1. Which specific game or recomp repo comes first, and which graphics backend does its runtime use (Vulkan, D3D12, OpenGL)? This decides where `recomp_probe.h` hooks in and which frame-time and GPU capture tools apply.
+2. Where do extracted game files live today (on the dev machine, or on a NAS)? This decides whether "push" or "LAN share" gets built first.

@@ -10,3 +10,11 @@ connection.json
 *.pem
 token
 captures/
+# copyrighted game data must never be committed
+gamedata/
+*.iso
+*.xiso
+*.gcm
+*.rvz
+*.ciso
+*.chd

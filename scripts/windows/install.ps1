@@ -22,13 +22,34 @@ $ErrorActionPreference = "Stop"
 $Prefix = Join-Path $env:LOCALAPPDATA "recomp-profiler"
 
 if (-not $NoPackages) {
-    # TODO: PresentMon has no winget id yet; fetch the release from GitHub (GameTechDev/PresentMon).
-    $pkgs = @("Python.Python.3.12", "Git.Git", "Microsoft.WindowsADK" <# WPR/WPA #>, "Microsoft.Sysinternals.Suite")
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        throw "winget not found. Install 'App Installer' from the Microsoft Store, then rerun."
+    }
+    # Everything the agent needs comes from here; no manual installs.
+    $pkgs = @(
+        "Python.Python.3.12",
+        "Git.Git",
+        "Microsoft.WinDbg",
+        "Microsoft.WindowsADK",            # WPR/WPA (Windows Performance Toolkit)
+        "Microsoft.Sysinternals.Suite"
+    )
     foreach ($p in $pkgs) {
         winget install --id $p --exact --silent --accept-package-agreements --accept-source-agreements
         if ($LASTEXITCODE -ne 0) { Write-Warning "winget could not install $p" }
     }
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+
+    # PresentMon (frame times) has no winget id: take the console build from the latest GitHub release.
+    $tools = Join-Path $Prefix "tools"
+    New-Item -ItemType Directory -Force -Path $tools | Out-Null
+    try {
+        $rel = Invoke-RestMethod "https://api.github.com/repos/GameTechDev/PresentMon/releases/latest"
+        $asset = $rel.assets | Where-Object { $_.name -match '^PresentMon-.*-x64\.exe$' } | Select-Object -First 1
+        Invoke-WebRequest $asset.browser_download_url -OutFile (Join-Path $tools "PresentMon.exe")
+        Write-Host "==> PresentMon $($rel.tag_name) -> $tools"
+    } catch {
+        Write-Warning "could not download PresentMon: $_"
+    }
 }
 
 Write-Host "==> creating venv in $Prefix\venv"
