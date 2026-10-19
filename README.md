@@ -1,0 +1,62 @@
+# Recomp Profiler
+
+Remote debug, profile and control of **bare-metal Linux and Windows test
+machines** for static-recompilation projects — exposed to Claude Code as an MCP
+server + skill, so testing a recomp on a friend's old laptop feels the same as
+testing it locally.
+
+```
+ dev machine (Claude Code)                     test machines (bare metal)
+┌──────────────────────────────┐   wss + token   ┌───────────────────────────┐
+│ skill: recomp-profiler       │  TLS pinned     │ recomp-agent (user session)│
+│ MCP:   recomp-profiler-mcp ──┼────────────────►│  system / process / fs     │
+│ CLI:   recomp-profiler       │  JSON-RPC 2.0   │  profile / debug (planned) │
+│ hosts: ~/.config/.../hosts/  │                 │  perf, gdb, MangoHud,      │
+└──────────────────────────────┘                 │  PresentMon, WPR, ...      │
+                                                 └───────────────────────────┘
+```
+
+## Quick start
+
+**Target (Linux)** — Debian/Ubuntu/Mint/Pop, Fedora/RHEL/Rocky/Alma, Arch/Manjaro/
+EndeavourOS/Garuda/CachyOS, openSUSE:
+
+```bash
+./scripts/install/install.sh --open-firewall --perf-tuning
+```
+
+It installs python + debugging/profiling tools, sets up the agent as a systemd
+user service in your desktop session and prints `connection.json` plus the
+machine's IP addresses.
+
+Or push from the dev machine over SSH (no GitHub access needed on the target):
+
+```bash
+./scripts/deploy-agent.sh user@192.168.1.50 --open-firewall
+```
+
+**Target (Windows)**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -OpenFirewall
+```
+
+**Dev machine**:
+
+```bash
+uv venv && uv pip install -e '.[mcp,dev]'
+.venv/bin/recomp-profiler add-host connection.json
+.venv/bin/recomp-profiler call my-laptop system.info
+```
+
+`.mcp.json` in this repo registers the MCP server for Claude Code; the skill is in
+`skills/recomp-profiler/`.
+
+## Security
+
+The agent executes arbitrary commands as the desktop user, which is the point.
+Access requires the 256-bit token and the client pins the agent's self-signed
+certificate. Keep it on a trusted LAN or VPN (Tailscale/WireGuard); don't port-forward it.
+`connection.json` is a credential.
+
+See [docs/PLAN.md](docs/PLAN.md) for the roadmap.

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+# never commit secrets produced by `recomp-agent init`
+connection.json
+*.pem
+token
+captures/

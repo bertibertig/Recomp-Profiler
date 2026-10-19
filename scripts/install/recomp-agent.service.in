@@ -1,0 +1,13 @@
+[Unit]
+Description=Recomp Profiler agent
+# Needs DISPLAY/WAYLAND_DISPLAY from the desktop session to launch games.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=@AGENT@ serve --port @PORT@
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
