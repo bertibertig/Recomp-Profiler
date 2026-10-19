@@ -27,6 +27,16 @@ just like it does locally, then compare the results across machines.
 
 The current recomps target 6th-gen consoles: **Xbox, GameCube and PS2**. Xbox 360 and PS3 come later.
 
+**First projects:** *SSX 3* and *Amped 2*, both Xbox versions.
+
+| Graphics API | Linux | Windows |
+|---|---|---|
+| Vulkan | ✅ now | ✅ now |
+| OpenGL | – | ✅ now |
+| D3D11 / D3D12 | – | later |
+
+Each API needs its own capture path. MangoHud covers Vulkan and OpenGL on Linux. PresentMon covers every API on Windows. RenderDoc handles Vulkan, OpenGL, D3D11 and D3D12 frame captures. Benchmarks record which API was used, so results stay comparable.
+
 ## Builds vs. game files
 
 These two are handled separately because they behave very differently:
@@ -44,7 +54,7 @@ A *manifest* lists every file with its size and hash, plus hashes of 4 MB chunks
 There are three ways to fill the store, and all of them are verified against the manifest:
 
 1. **Push from the dev machine (LAN default).** The agent compares manifests and only the missing chunks are streamed. They go over a dedicated binary channel on the same TLS port, using parallel streams that can resume after interruption, and each chunk is verified on arrival. Optional zstd compression is turned off automatically for data that doesn't shrink, since disc data mostly doesn't. On gigabit LAN, a full 8.5 GB DVD takes about 80 s and 16 GB about 2.5 min.
-2. **Pull from a LAN share.** You configure an SMB/NFS/HTTP share (for example a NAS), and the agent copies from it directly, so the data never passes through the dev machine.
+2. **Pull from a LAN share.** You configure an SMB/NFS/HTTP share, and the agent copies from it directly, so the data never passes through the dev machine. Your current setup is an NAS server at `192.0.2.10` with the share `games`, available over both NFS and SMB. Linux agents use NFS, Windows agents use SMB.
 3. **Extract on the target.** The tester points the agent at their *own* disc image, and the agent runs the recomp's extractor locally. The result is checked against the expected manifest and the known dump hashes (Redump). This is the **only** mode allowed for hosts marked `trust: external` (remote testers over Tailscale), so game data is never distributed to other people.
 
 ## Status: phase 0 (skeleton) ✅
@@ -65,7 +75,8 @@ There are three ways to fill the store, and all of them are verified against the
 - [ ] Binary streaming channel for file transfer (base64 currently costs 33% extra): parallel, resumable, chunk-verified, with progress reporting
 - [ ] Manifest format and a tool that generates one from an extracted game directory or a build output (`recomp-profiler manifest <dir>`)
 - [ ] Content-addressed store on the agent, with `gamedata.status/sync/link/gc` RPCs; MCP tools `sync_gamedata` and `deploy_build` that send only deltas
-- [ ] Source: pull from an SMB/NFS/HTTP share configured on the agent
+- [ ] Source: pull from an SMB/NFS/HTTP share configured on the agent (first target: NAS `192.0.2.10`, share `games`; NFS on Linux, SMB on Windows; SMB credentials stay in the agent's local config, never in this repo)
+- [ ] Source: push from game files that sit in the dev machine's local recomp project folders (the current setup for SSX 3 and Amped 2)
 - [ ] Source: extract on the target from the tester's own disc image using the recomp's extractor, checked against Redump hashes
 - [ ] Host `trust: own|external` flag, and refuse to push game data to external hosts
 - [ ] Disk space checks and garbage collection of unused datasets and builds
@@ -117,6 +128,11 @@ There are three ways to fill the store, and all of them are verified against the
 - [ ] Steam Deck / SteamOS: user-space only, Flatpak MangoHud
 - [ ] Optional single-file agent binary (PyInstaller or Nuitka) for machines that shouldn't get a Python install
 
+### Phase 5b: retro Windows targets (minor goal, much later)
+- [ ] Run and profile recomps on **Windows XP and Windows 98** machines. Python can't run there (XP's last supported version is 3.4; 98 has none), so this needs a small native agent written in C (Winsock + a subset of the RPC) built with an old toolchain (e.g. MinGW / VC6-compatible)
+- [ ] Measure frame times with in-process `recomp_probe.h` timing, since PresentMon/ETW don't exist there; D3D8/D3D9 or OpenGL 1.x/2.x backends would come from the recomp side
+- [ ] TLS on 98 is impractical: use a plain token over a trusted LAN only, or tunnel through a modern relay host
+
 ### Phase 6: security hardening
 - [ ] Token rotation command; client IP allowlist
 - [ ] Audit log on the agent of every command executed
@@ -125,10 +141,13 @@ There are three ways to fill the store, and all of them are verified against the
 
 ## Decisions
 - Platforms: Xbox, GameCube and PS2 first; 360 and PS3 later.
+- First projects: SSX 3 and Amped 2 (Xbox). Vulkan on Linux; Vulkan + OpenGL on Windows; D3D11/D3D12 later.
+- Game files: currently in the local project folders; ROMs also on the NAS NFS/SMB share `192.0.2.10` → `roms`.
+- Retro Windows (XP/98): minor goal, much later.
 - Windows: Python is fine, but `install.ps1` must install it (and every other tool) through winget.
 - Network: LAN first; Tailscale or another VPN later for remote testers.
 - License: MIT.
 
 ## Open questions
-1. Which specific game or recomp repo comes first, and which graphics backend does its runtime use (Vulkan, D3D12, OpenGL)? This decides where `recomp_probe.h` hooks in and which frame-time and GPU capture tools apply.
-2. Where do extracted game files live today (on the dev machine, or on a NAS)? This decides whether "push" or "LAN share" gets built first.
+1. Where are the SSX 3 and Amped 2 recomp repos (local paths/GitHub), and what does their runtime look like (shared runtime between both? existing frame timing or Tracy?) This decides where `recomp_probe.h` hooks in.
+2. Does the share hold raw disc images, extracted game files, or both? Pulling extracted files is direct; images need the extract-on-target step.
