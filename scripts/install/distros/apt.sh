@@ -1,4 +1,5 @@
 # Debian, Ubuntu, Mint, Pop!_OS, Zorin, elementary, Kali, ...
+BOOTSTRAP_PKGS=(python3 python3-venv python3-pip)
 PKGS=(python3 python3-venv python3-pip git gdb strace ltrace valgrind binutils elfutils
       pciutils usbutils lshw dmidecode vulkan-tools mesa-utils sysstat lm-sensors
       mangohud bpftrace)

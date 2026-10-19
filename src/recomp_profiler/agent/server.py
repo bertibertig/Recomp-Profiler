@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import ssl
@@ -26,14 +27,32 @@ MAX_FRAME = 64 * 1024 * 1024
 
 
 class Agent:
-    def __init__(self, token: str, host: str, port: int, cert: Path | None, key: Path | None):
+    def __init__(
+        self,
+        token: str,
+        host: str,
+        port: int,
+        cert: Path | None,
+        key: Path | None,
+        allowed_clients: list[str] | None = None,
+    ):
         self.token = token
+        self.allowed = [ipaddress.ip_network(c, strict=False) for c in allowed_clients or []]
         self.host = host
         self.port = port
         self.cert = cert
         self.key = key
 
+    def _client_allowed(self, connection: ServerConnection) -> bool:
+        if not self.allowed:
+            return True
+        ip = ipaddress.ip_address(connection.remote_address[0])
+        return any(ip in net for net in self.allowed)
+
     def _check_auth(self, connection: ServerConnection, request: Request):
+        if not self._client_allowed(connection):
+            log.warning("rejected connection from %s: not in allowed_clients", connection.remote_address)
+            return connection.respond(HTTPStatus.FORBIDDEN, "client not allowed\n")
         header = request.headers.get("Authorization", "")
         scheme, _, value = header.partition(" ")
         if scheme.lower() != "bearer" or not tokens_equal(value, self.token):

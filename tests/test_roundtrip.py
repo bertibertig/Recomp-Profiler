@@ -78,3 +78,19 @@ async def test_file_roundtrip(agent, tmp_path):
         await c.push_file(src, str(tmp_path / "remote" / "build.bin"))
         await c.pull_file(str(tmp_path / "remote" / "build.bin"), tmp_path / "back.bin")
     assert (tmp_path / "back.bin").read_bytes() == src.read_bytes()
+
+
+async def test_allowlist_rejects_other_clients(tmp_path):
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    generate_self_signed_cert(cert, key, "test")
+    port = _free_port()
+    a = Agent("secret", "127.0.0.1", port, cert, key, allowed_clients=["10.0.0.0/8"])
+    task = asyncio.create_task(a.serve_forever())
+    await asyncio.sleep(0.3)
+    try:
+        with pytest.raises(Exception):
+            async with AgentClient(HostConfig("t", "127.0.0.1", port, "secret", cert_fingerprint_from_pem(cert))):
+                pass
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

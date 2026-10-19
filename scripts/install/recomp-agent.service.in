@@ -5,7 +5,8 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=@AGENT@ serve --port @PORT@
+# bind/port/allowlist come from config.toml (recomp-profiler tui)
+ExecStart=@AGENT@ serve
 Restart=on-failure
 RestartSec=3
 

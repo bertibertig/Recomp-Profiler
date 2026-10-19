@@ -29,6 +29,13 @@ deploy, run, read logs, measure, iterate.
    CPU-bound vs GPU-bound verdict, crashes with backtrace. Compare against the
    other targets and derive min/recommended requirements only from measured runs.
 
+## Configuration
+
+ROM sources, games (where the files are, extracted or disc image, supported
+render backends incl. the CPU software renderer), agent settings and hosts are
+in `config.toml`, edited by the user with `recomp-profiler tui`. Read it (or ask
+the user to update it in the TUI) instead of guessing paths.
+
 ## Rules
 
 - Never run destructive commands (`rm -rf`, package removal, reboot) on a target

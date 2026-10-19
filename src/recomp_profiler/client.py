@@ -29,11 +29,12 @@ class HostConfig:
     token: str
     tls_fingerprint_sha256: str | None = None
     platform: str | None = None
+    trust: str = "own"  # "external" = someone else's machine: never push game data
 
     @classmethod
     def load(cls, path: Path) -> "HostConfig":
         d = json.loads(path.read_text())
-        return cls(**{k: d.get(k) for k in cls.__dataclass_fields__})
+        return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
     @property
     def url(self) -> str:

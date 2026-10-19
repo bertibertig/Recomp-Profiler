@@ -9,6 +9,9 @@ dependencies = [
     "websockets>=13",
     "psutil>=5.9",
     "cryptography>=42",
+    "textual>=1.0",
+    "tomli>=2; python_version < \"3.11\"",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +30,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/recomp_profiler"]
+
+# Ship the install scripts so the TUI's System setup works from a plain pip install.
+[tool.hatch.build.targets.wheel.force-include]
+"scripts" = "recomp_profiler/scripts"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

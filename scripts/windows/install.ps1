@@ -1,44 +1,72 @@
 <#
 .SYNOPSIS
-  Install the recomp-profiler agent on a Windows test machine.
+  Install / configure the recomp-profiler agent on a Windows test machine.
 .DESCRIPTION
-  Installs Python + profiling tools via winget, creates a venv, generates the
-  token/TLS cert, registers a logon task (the agent must run in the interactive
-  session to launch games) and prints connection.json.
-  Run from an elevated PowerShell only for -OpenFirewall; otherwise as the desktop user.
+  No arguments: install Python via winget, create the venv, write connection info,
+  then open the setup TUI (recomp-profiler tui).
+  -All: everything headless (tools, venv, init, logon task, optional firewall).
+  -Only <step>: one step: packages | venv | init | service | firewall
+  The agent runs as a logon task in the interactive session so it can launch games.
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -OpenFirewall
+  powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -All -OpenFirewall
 #>
 param(
-    [int]$Port = 47800,
-    [string]$Name = $env:COMPUTERNAME,
+    [switch]$All,
+    [ValidateSet("", "packages", "venv", "init", "service", "firewall")]
+    [string]$Only = "",
+    [int]$Port = 0,
+    [string]$Name = "",
     [string]$Address = "",
-    [string]$Source = (Resolve-Path "$PSScriptRoot\..\.."),
+    [string]$Source = "",
     [switch]$NoPackages,
     [switch]$NoTask,
-    [switch]$OpenFirewall
+    [switch]$OpenFirewall,
+    [switch]$NoTui
 )
 $ErrorActionPreference = "Stop"
 $Prefix = Join-Path $env:LOCALAPPDATA "recomp-profiler"
+$Venv = Join-Path $Prefix "venv"
+$Agent = Join-Path $Venv "Scripts\recomp-agent.exe"
+$Cli = Join-Path $Venv "Scripts\recomp-profiler.exe"
+$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
-if (-not $NoPackages) {
+if (-not $Source) {
+    if (Test-Path (Join-Path $RepoRoot "pyproject.toml")) { $Source = "$RepoRoot" }
+    elseif (Test-Path $Cli) {
+        $Source = & (Join-Path $Venv "Scripts\python.exe") -c "from recomp_profiler import settings; print(settings.load().install.source)"
+    }
+}
+
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+function Winget-Install([string[]]$ids) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw "winget not found. Install 'App Installer' from the Microsoft Store, then rerun."
     }
+    foreach ($id in $ids) {
+        winget install --id $id --exact --silent --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) { Write-Warning "winget could not install $id" }
+    }
+    Refresh-Path
+}
+
+function Step-Bootstrap {
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) { Winget-Install @("Python.Python.3.12") }
+}
+
+function Step-Packages {
     # Everything the agent needs comes from here; no manual installs.
-    $pkgs = @(
+    Winget-Install @(
         "Python.Python.3.12",
         "Git.Git",
         "Microsoft.WinDbg",
         "Microsoft.WindowsADK",            # WPR/WPA (Windows Performance Toolkit)
         "Microsoft.Sysinternals.Suite"
     )
-    foreach ($p in $pkgs) {
-        winget install --id $p --exact --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) { Write-Warning "winget could not install $p" }
-    }
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-
     # PresentMon (frame times) has no winget id: take the console build from the latest GitHub release.
     $tools = Join-Path $Prefix "tools"
     New-Item -ItemType Directory -Force -Path $tools | Out-Null
@@ -52,31 +80,76 @@ if (-not $NoPackages) {
     }
 }
 
-Write-Host "==> creating venv in $Prefix\venv"
-py -3 -m venv "$Prefix\venv"
-& "$Prefix\venv\Scripts\python.exe" -m pip install -q --upgrade pip
-& "$Prefix\venv\Scripts\pip.exe" install -q "$Source"
-$agent = "$Prefix\venv\Scripts\recomp-agent.exe"
-
-$initArgs = @("init", "--port", $Port, "--name", $Name)
-if ($Address) { $initArgs += @("--host-address", $Address) }
-& $agent @initArgs | Out-Null
-
-if ($OpenFirewall) {
-    New-NetFirewallRule -DisplayName "recomp-agent" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -Profile Private | Out-Null
+function Step-Venv {
+    if (-not $Source) { throw "no agent source known; pass -Source PATH|URL" }
+    Write-Host "==> creating venv in $Venv"
+    py -3 -m venv --clear $Venv
+    & (Join-Path $Venv "Scripts\python.exe") -m pip install -q --upgrade pip
+    & (Join-Path $Venv "Scripts\pip.exe") install -q "$Source"
+    & $Cli config-set install.source "$Source"
 }
 
-if (-not $NoTask) {
-    $action = New-ScheduledTaskAction -Execute $agent -Argument "serve --port $Port"
+function Step-Init {
+    if ($Port) { & $Cli config-set agent.port $Port }
+    if ($Name) { & $Cli config-set agent.name $Name }
+    if ($Address) { & $Cli config-set agent.address $Address }
+    & $Agent init | Out-Null
+}
+
+function Agent-Port {
+    if ($Port) { return $Port }
+    return [int](& (Join-Path $Venv "Scripts\python.exe") -c "from recomp_profiler import settings; print(settings.load().agent.port)")
+}
+
+function Step-Firewall {
+    # Needs an elevated shell.
+    $p = Agent-Port
+    Remove-NetFirewallRule -DisplayName "recomp-agent" -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "recomp-agent" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow -Profile Private | Out-Null
+    Write-Host "==> firewall: TCP $p allowed on private networks"
+}
+
+function Step-Service {
+    # bind/port/allowlist come from config.toml
+    $action = New-ScheduledTaskAction -Execute $Agent -Argument "serve"
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName "recomp-agent" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+    Stop-ScheduledTask -TaskName "recomp-agent" -ErrorAction SilentlyContinue
     Start-ScheduledTask -TaskName "recomp-agent"
 }
 
-$conn = Join-Path $env:APPDATA "recomp-profiler\agent\connection.json"
-Write-Host "`n==> agent installed. Connection info ($conn):"
-Get-Content $conn
-Write-Host "`n==> IPv4 addresses:"
-Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne "127.0.0.1" } | ForEach-Object { "    $($_.InterfaceAlias)  $($_.IPAddress)" }
-Write-Host "`nOn the dev machine: recomp-profiler add-host connection.json  (file contains the token; transfer privately)"
+function Report {
+    $conn = Join-Path $env:APPDATA "recomp-profiler\agent\connection.json"
+    Write-Host "`n==> connection info ($conn):"
+    Get-Content $conn
+    Write-Host "`n==> IPv4 addresses:"
+    Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne "127.0.0.1" } | ForEach-Object { "    $($_.InterfaceAlias)  $($_.IPAddress)" }
+    Write-Host "`nOn the dev machine: recomp-profiler add-host connection.json  (file contains the token; transfer privately)"
+}
+
+if ($Only) {
+    switch ($Only) {
+        "packages" { Step-Packages }
+        "venv" { Step-Venv }
+        "init" { Step-Init }
+        "service" { Step-Service }
+        "firewall" { Step-Firewall }
+    }
+} elseif ($All -or $NoPackages -or $NoTask -or $OpenFirewall) {
+    if ($NoPackages) { Step-Bootstrap } else { Step-Packages }
+    Step-Venv
+    Step-Init
+    if ($OpenFirewall) { Step-Firewall }
+    if (-not $NoTask) { Step-Service }
+    Report
+} else {
+    Step-Bootstrap
+    Step-Venv
+    Step-Init
+    if ($NoTui) { Report }
+    else {
+        Write-Host "==> opening the setup TUI (System setup tab installs tools, autostart, firewall, ...)"
+        & $Cli tui --tab system
+    }
+}

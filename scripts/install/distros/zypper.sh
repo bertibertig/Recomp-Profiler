@@ -1,10 +1,11 @@
 # openSUSE Tumbleweed / Leap, SLES
+BOOTSTRAP_PKGS=(python3 python3-pip)
 PKGS=(python3 python3-pip git gdb strace ltrace valgrind binutils elfutils
       pciutils usbutils lshw dmidecode vulkan-tools Mesa-demo-x sysstat sensors
       perf mangohud bpftrace)
 # Leap's default python3 is 3.6; use the newest packaged one.
 if [[ "$DISTRO_ID" == opensuse-leap || "$DISTRO_ID" == sles ]]; then
-    PKGS+=(python311 python311-pip); PYTHON=python3.11
+    BOOTSTRAP_PKGS=(python311 python311-pip); PKGS+=(python311 python311-pip); PYTHON=python3.11
 fi
 
 pkg_refresh() { $SUDO zypper --non-interactive refresh; }

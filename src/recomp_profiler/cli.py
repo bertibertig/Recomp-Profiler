@@ -1,8 +1,10 @@
-"""``recomp-profiler`` dev-machine CLI: manage hosts and poke agents by hand.
+"""``recomp-profiler`` CLI.
 
+    recomp-profiler tui [--tab TAB]          # configure everything interactively
     recomp-profiler add-host connection.json [--name NAME]
     recomp-profiler hosts
     recomp-profiler call HOST METHOD [JSON_PARAMS]
+    recomp-profiler config-set SECTION.KEY VALUE   # for scripts; prefer the TUI
 """
 
 from __future__ import annotations
@@ -52,9 +54,36 @@ def cmd_call(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tui(args: argparse.Namespace) -> int:
+    from .tui.app import run
+
+    run(args.tab)
+    return 0
+
+
+def cmd_config_set(args: argparse.Namespace) -> int:
+    from . import settings
+
+    s = settings.load()
+    settings.set_value(s, args.key, args.value)
+    errors = s.validate()
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
+    settings.save(s)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="recomp-profiler")
     sub = p.add_subparsers(dest="cmd", required=True)
+    t = sub.add_parser("tui", help="interactive configuration")
+    t.add_argument("--tab", choices=["overview", "agent", "system", "sources", "games", "hosts", "storage"])
+    t.set_defaults(fn=cmd_tui)
+    cs = sub.add_parser("config-set", help="set one config.toml value")
+    cs.add_argument("key")
+    cs.add_argument("value")
+    cs.set_defaults(fn=cmd_config_set)
     a = sub.add_parser("add-host", help="register a target from its connection.json")
     a.add_argument("connection_file")
     a.add_argument("--name")

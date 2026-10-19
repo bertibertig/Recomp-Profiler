@@ -3,7 +3,8 @@
 # installer there, and register the target locally. Works with a private repo
 # because the target never needs GitHub access.
 #
-#   ./scripts/deploy-agent.sh user@target [install.sh options...]
+#   ./scripts/deploy-agent.sh user@target                 # bootstrap, then the setup TUI over SSH
+#   ./scripts/deploy-agent.sh user@target --all [opts]    # headless full install
 set -euo pipefail
 target="${1:?usage: $0 user@host [install options]}"; shift
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

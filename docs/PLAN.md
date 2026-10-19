@@ -31,11 +31,28 @@ The current recomps target 6th-gen consoles: **Xbox, GameCube and PS2**. Xbox 36
 
 | Graphics API | Linux | Windows |
 |---|---|---|
+| CPU (software renderer) | ✅ now | ✅ now |
 | Vulkan | ✅ now | ✅ now |
 | OpenGL | – | ✅ now |
 | D3D11 / D3D12 | – | later |
 
-Each API needs its own capture path. MangoHud covers Vulkan and OpenGL on Linux. PresentMon covers every API on Windows. RenderDoc handles Vulkan, OpenGL, D3D11 and D3D12 frame captures. Benchmarks record which API was used, so results stay comparable.
+The **CPU (software) renderer** is where every project starts before a GPU backend exists, and it stays as the compatibility fallback. It also matters for profiling: rendering cost appears in the CPU profile instead of on the GPU, so its frame times come from `recomp_probe.h` frame markers (MangoHud and PresentMon only see presents, if the window presents at all). It gets its own line in the system requirements, since it is mostly CPU-bound. It is also the realistic path for the retro Windows targets.
+
+Each GPU API needs its own capture path. MangoHud covers Vulkan and OpenGL on Linux. PresentMon covers every API on Windows. RenderDoc handles Vulkan, OpenGL, D3D11 and D3D12 frame captures. Benchmarks record which API was used, so results stay comparable.
+
+## Configuration TUI
+
+Everything that can be configured is configured through one TUI (`recomp-profiler tui`, built with Textual; it works in Linux terminals, Windows Terminal and over SSH). Settings live in `config.toml` in the config directory, and secrets (SMB passwords) in a separate `secrets.toml` readable only by the user.
+
+* **Install scripts are bootstrappers:** `install.sh` / `install.ps1` without arguments install only Python and the venv, then open the TUI. With arguments (`--all`, `--only <step>`, …) they run headless, which CI and `deploy-agent.sh` need. The TUI's setup actions call the same scripts with `--only <step>`, so there's a single implementation of each step.
+* **Tabs:**
+  * **Overview:** agent status, version, connection info and IP addresses
+  * **Agent:** name, bind address, port, advertised address, client IP allowlist, log level; rotate token/certificate; show `connection.json`
+  * **System setup:** install/reinstall packages, perf/ptrace tuning, firewall, autostart service, uninstall
+  * **ROM sources:** NFS/SMB/local/HTTP shares (e.g. the NAS `roms` share), with a connection test
+  * **Games:** per game: platform, recomp project folder, ROM source, path in the source, whether it's **extracted or a disc image** (plus the extractor command for images), supported and default render backend
+  * **Hosts:** registered target machines, trust level (own/external), ping, remove
+  * **Storage & profiling:** game-data store location and size limit, captures directory and retention, benchmark defaults (warm-up, duration)
 
 ## Builds vs. game files
 
@@ -87,8 +104,17 @@ There are three ways to fill the store, and all of them are verified against the
 - [ ] Reconnect and handshake version checks; `agent.update` for self-update from the dev machine
 - [ ] Per-host locking, so two sessions don't benchmark the same machine at once
 
+### Phase 1b: configuration TUI
+- [x] `config.toml` model (agent, storage, profiling, ROM sources, games) with separate secrets
+- [x] TUI skeleton with tabs: Overview, Agent, System setup, ROM sources, Games, Hosts, Storage & profiling
+- [x] Install scripts: bootstrap mode → TUI; headless `--all` / `--only <step>`
+- [ ] ROM source "test connection" (`showmount -e` / `smbclient -L` on Linux, `Test-NetConnection` + `net view` on Windows) and mounting: fstab/autofs entry or userspace SMB/NFS access, so the agent doesn't need root at runtime
+- [ ] Browse the share inside the TUI to pick a game's path, and auto-detect image vs. extracted
+- [ ] Apply agent changes live (restart the service from the TUI) and validate settings before saving
+- [ ] Windows parity for the System setup actions (`install.ps1 -Only <step>`)
+
 ### Phase 2: profiling backends (`profile.start/stop` → capture file → pull → summarize)
-- [ ] **Frame times:** MangoHud CSV log on Linux (Vulkan/GL) and PresentMon on Windows. Report avg, 1% low, 0.1% low, a stutter histogram and a frame-time graph
+- [ ] **Frame times:** MangoHud CSV log on Linux (Vulkan/GL) and PresentMon on Windows. Report avg, 1% low, 0.1% low, a stutter histogram and a frame-time graph. For the CPU renderer, frame times come from `recomp_probe.h` frame markers
 - [ ] **CPU:** `perf stat` counters (IPC, cache misses, context switches) and `perf record`. Fold stacks into a text summary Claude can read (top functions, hottest recompiled blocks). WPR/ETW on Windows via `wpaexporter`
 - [ ] **GPU:** nvidia-smi dmon, the amdgpu sysfs `gpu_busy_percent`, intel_gpu_top. RenderDoc remote capture of individual frames
 - [ ] **Tracy:** headless `tracy-capture` on the agent when the recomp runtime is built with Tracy
@@ -130,6 +156,7 @@ There are three ways to fill the store, and all of them are verified against the
 
 ### Phase 5b: retro Windows targets (minor goal, much later)
 - [ ] Run and profile recomps on **Windows XP and Windows 98** machines. Python can't run there (XP's last supported version is 3.4; 98 has none), so this needs a small native agent written in C (Winsock + a subset of the RPC) built with an old toolchain (e.g. MinGW / VC6-compatible)
+- [ ] Start with the CPU (software) renderer there; it avoids old-driver problems
 - [ ] Measure frame times with in-process `recomp_probe.h` timing, since PresentMon/ETW don't exist there; D3D8/D3D9 or OpenGL 1.x/2.x backends would come from the recomp side
 - [ ] TLS on 98 is impractical: use a plain token over a trusted LAN only, or tunnel through a modern relay host
 
@@ -141,7 +168,8 @@ There are three ways to fill the store, and all of them are verified against the
 
 ## Decisions
 - Platforms: Xbox, GameCube and PS2 first; 360 and PS3 later.
-- First projects: SSX 3 and Amped 2 (Xbox). Vulkan on Linux; Vulkan + OpenGL on Windows; D3D11/D3D12 later.
+- First projects: SSX 3 and Amped 2 (Xbox). CPU (software) renderer on both; Vulkan on Linux; Vulkan + OpenGL on Windows; D3D11/D3D12 later.
+- All configuration (installs, reinstalls, ROM shares, game locations, agent settings) goes through the TUI.
 - Game files: currently in the local project folders; ROMs also on the NAS NFS/SMB share `192.0.2.10` → `roms`.
 - Retro Windows (XP/98): minor goal, much later.
 - Windows: Python is fine, but `install.ps1` must install it (and every other tool) through winget.

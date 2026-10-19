@@ -22,12 +22,14 @@ testing it locally.
 EndeavourOS/Garuda/CachyOS, openSUSE:
 
 ```bash
-./scripts/install/install.sh --open-firewall --perf-tuning
+./scripts/install/install.sh
 ```
 
-It installs python + debugging/profiling tools, sets up the agent as a systemd
-user service in your desktop session and prints `connection.json` plus the
-machine's IP addresses.
+This installs Python and the agent, then opens the **setup TUI**. Everything
+else is done from there: installing debugging/profiling tools, autostart
+service, firewall, perf tuning, agent settings, ROM sources and games. For
+scripted setups, use `install.sh --all [--open-firewall --perf-tuning]` or
+`install.sh --only <step>`.
 
 Or push from the dev machine over SSH (no GitHub access needed on the target):
 
@@ -45,6 +47,7 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -OpenFirewa
 
 ```bash
 uv venv && uv pip install -e '.[mcp,dev]'
+.venv/bin/recomp-profiler tui        # hosts, ROM sources, games, settings
 .venv/bin/recomp-profiler add-host connection.json
 .venv/bin/recomp-profiler call my-laptop system.info
 ```
