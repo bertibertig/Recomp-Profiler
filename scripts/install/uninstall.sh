@@ -4,6 +4,8 @@ set -euo pipefail
 systemctl --user disable --now recomp-agent.service 2>/dev/null || true
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/recomp-agent.service"
 systemctl --user daemon-reload 2>/dev/null || true
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/recomp-agent.desktop"
+pkill -u "$USER" -f "recomp-profiler/venv/bin/recomp-agent serve" 2>/dev/null || true
 rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/recomp-profiler"
 rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/recomp-profiler/agent"
 rm -f "$HOME/.local/bin/recomp-agent"

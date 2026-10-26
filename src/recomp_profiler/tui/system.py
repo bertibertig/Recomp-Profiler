@@ -41,7 +41,7 @@ STEPS = [
     Step("packages", "Install / reinstall tools", "Debuggers, profilers, GPU and system tools via the distro package manager / winget", True),
     Step("venv", "Reinstall agent", "Recreate the Python environment from the configured agent source"),
     Step("init", "Write connection info", "Create token/cert if missing and rewrite connection.json from the Agent settings"),
-    Step("service", "Install / restart autostart", "systemd user service (Linux) or logon task (Windows)"),
+    Step("service", "Install / restart autostart", "systemd user service or XDG autostart entry (Linux), logon task (Windows)"),
     Step("perf", "Perf + debugger tuning", "Allow perf and ptrace attach for normal users (Linux, sysctl)", True),
     Step("firewall", "Open firewall port", "ufw / firewalld / Windows Firewall rule for the agent port", True),
     Step("uninstall", "Uninstall agent", "Remove agent, service and credentials; distro packages stay"),
@@ -78,10 +78,22 @@ def service_status() -> str:
             if line.strip().startswith("Status:"):
                 return line.split(":", 1)[1].strip()
         return "installed"
-    if not shutil.which("systemctl"):
-        return "no systemd"
-    out = _run_sync(["systemctl", "--user", "is-active", "recomp-agent.service"], ok_codes=None)
-    return (out or "unknown").strip()
+    if Path("/run/systemd/system").is_dir() and _run_sync(["systemctl", "--user", "show-environment"]) is not None:
+        out = _run_sync(["systemctl", "--user", "is-active", "recomp-agent.service"], ok_codes=None)
+        return (out or "unknown").strip()
+    # No systemd user manager (e.g. MX Linux on sysvinit): install.sh falls back to XDG autostart.
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "autostart" / "recomp-agent.desktop"
+    if not xdg.exists():
+        return "not installed"
+    return "autostart, " + ("running" if _agent_running() else "not running")
+
+
+def _agent_running() -> bool:
+    for p in psutil.process_iter(["cmdline"]):
+        cmd = p.info["cmdline"] or []
+        if any(Path(c).name == "recomp-agent" for c in cmd[:2]) and "serve" in cmd:
+            return True
+    return False
 
 
 def _run_sync(argv: list[str], ok_codes: tuple | None = (0,)) -> str | None:

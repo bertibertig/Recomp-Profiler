@@ -18,4 +18,8 @@ ssh -t "$target" "$remote_dir/scripts/install/install.sh $*"
 
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 ssh "$target" 'cat "${XDG_CONFIG_HOME:-$HOME/.config}/recomp-profiler/agent/connection.json"' > "$tmp"
-recomp-profiler add-host "$tmp"
+# Prefer the checkout's venv so this works without activating it (fish, plain shells).
+cli="$repo/.venv/bin/recomp-profiler"
+[[ -x "$cli" ]] || cli="$(command -v recomp-profiler)" \
+    || { echo "recomp-profiler not found; run: uv venv && uv pip install -e '.[mcp,dev]'" >&2; exit 1; }
+"$cli" add-host "$tmp"

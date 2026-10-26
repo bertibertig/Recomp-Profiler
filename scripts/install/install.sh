@@ -10,7 +10,7 @@
 #   --address IP        address the dev machine should use (default: auto-detect)
 #   --source PATH|URL   pip source for the package (default: this checkout)
 #   --no-packages       --all without distro packages
-#   --no-service        --all without the systemd user service
+#   --no-service        --all without autostart (systemd user service, else XDG autostart)
 #   --open-firewall     --all plus opening the port in ufw / firewalld
 #   --perf-tuning       --all plus allowing perf + ptrace for normal users
 #   --no-tui            bootstrap without opening the TUI
@@ -152,7 +152,7 @@ agent_port() {
 
 step_firewall() {
     local port; port="${PORT:-$(agent_port)}"
-    if command -v ufw >/dev/null && $SUDO ufw status | grep -q active; then
+    if command -v ufw >/dev/null && $SUDO ufw status | grep -q '^Status: active'; then
         $SUDO ufw allow "$port/tcp" comment recomp-agent
     elif command -v firewall-cmd >/dev/null && $SUDO firewall-cmd --state >/dev/null 2>&1; then
         $SUDO firewall-cmd --permanent --add-port="$port/tcp" && $SUDO firewall-cmd --reload
@@ -161,8 +161,34 @@ step_firewall() {
     fi
 }
 
+# systemctl can be installed without systemd running (MX Linux on sysvinit, Devuan).
+have_user_systemd() {
+    [[ -d /run/systemd/system ]] && systemctl --user show-environment >/dev/null 2>&1
+}
+
+step_service_xdg() {
+    local dir="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+    info "no running systemd user manager; using XDG autostart ($dir/recomp-agent.desktop)"
+    mkdir -p "$dir"
+    cat > "$dir/recomp-agent.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Recomp Profiler agent
+Exec="$VENV/bin/recomp-agent" serve
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+    pkill -u "$USER" -f "$VENV/bin/recomp-agent serve" 2>/dev/null || true
+    if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+        setsid -f "$VENV/bin/recomp-agent" serve >/dev/null 2>&1 </dev/null
+        info "agent started in this session"
+    else
+        warn "no graphical session here; the agent starts at your next desktop login"
+    fi
+}
+
 step_service() {
-    command -v systemctl >/dev/null || { warn "no systemd; start 'recomp-agent serve' from your session autostart"; return 0; }
+    have_user_systemd || { step_service_xdg; return 0; }
     local unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$unit_dir"
     sed -e "s|@AGENT@|$VENV/bin/recomp-agent|" "$SCRIPT_DIR/recomp-agent.service.in" > "$unit_dir/recomp-agent.service"
