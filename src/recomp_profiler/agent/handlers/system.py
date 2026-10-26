@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shlex
 import socket
 import sys
 import time
@@ -38,6 +39,22 @@ def _cpu_model() -> str:
     return platform.processor() or platform.machine()
 
 
+_GPU_CLASSES = ("VGA compatible controller", "3D controller", "Display controller")
+
+
+def _parse_lspci_gpus(out: str) -> list[dict]:
+    # `lspci -mm`: slot "class" "vendor" "device" [-rREV] [-pPROGIF] "subvendor" "subdevice"
+    gpus = []
+    for line in out.splitlines():
+        try:
+            fields = [f for f in shlex.split(line) if not f.startswith("-")]
+        except ValueError:
+            continue
+        if len(fields) >= 4 and fields[1] in _GPU_CLASSES:
+            gpus.append({"name": fields[3], "vendor": fields[2], "source": "lspci"})
+    return gpus
+
+
 async def _gpus() -> list[dict]:
     gpus: list[dict] = []
     nv = await run_capture(
@@ -62,10 +79,7 @@ async def _gpus() -> list[dict]:
             for g in data if isinstance(data, list) else [data]:
                 gpus.append({"name": g.get("Name"), "driver": g.get("DriverVersion"), "source": "wmi"})
     elif not gpus:
-        lspci = await run_capture(["lspci", "-mm"])
-        for line in (lspci or "").splitlines():
-            if any(k in line for k in ('"VGA', '"3D controller', '"Display controller')):
-                gpus.append({"name": line.split('" "', 2)[-1].strip('"'), "source": "lspci"})
+        gpus.extend(_parse_lspci_gpus(await run_capture(["lspci", "-mm"]) or ""))
     # TODO: vulkaninfo --summary for API/driver versions (Mesa vs proprietary).
     return gpus
 

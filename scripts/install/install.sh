@@ -52,6 +52,8 @@ MODE="${MODE:-bootstrap}"
 [[ -t 0 ]] || DO_TUI=0
 
 [[ $EUID -eq 0 ]] && die "run as your normal desktop user, not root"
+# Debian keeps ufw/iptables/sysctl in /usr/sbin, which isn't on a normal user's PATH over SSH.
+PATH="$PATH:/usr/sbin:/sbin"
 SUDO=sudo; command -v sudo >/dev/null || SUDO=doas
 
 # Default source: this checkout when run from one, else what the last install used.
